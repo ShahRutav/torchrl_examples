@@ -3,7 +3,7 @@ exp_name: cheetah
 record_interval: 1
 
 # Environment
-task: HalfCheetah-v4
+task: visual_franka_slide_random-v3
 frame_skip: 2
 from_pixels: false
 reward_scaling: 5.0

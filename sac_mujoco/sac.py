@@ -1,6 +1,7 @@
 # Make all the necessary imports for training
 
 
+import os
 import argparse
 import yaml
 from typing import Optional
@@ -11,10 +12,12 @@ import torch.cuda
 import tqdm
 
 import wandb
+#from torchrl.objectives import SACLoss
 from sac_loss import SACLoss
 
 from torch import nn, optim
 from torchrl.collectors import MultiaSyncDataCollector
+from torchrl.collectors.collectors import RandomPolicy
 from torchrl.data import TensorDictPrioritizedReplayBuffer, TensorDictReplayBuffer
 
 from torchrl.data.replay_buffers.storages import LazyMemmapStorage
@@ -25,6 +28,7 @@ from torchrl.envs import (
     ObservationNorm,
     ParallelEnv,
 )
+from torchrl.envs import EnvCreator
 from torchrl.envs.libs.dm_control import DMControlEnv
 from torchrl.envs.libs.gym import GymEnv
 from torchrl.envs.transforms import RewardScaling, TransformedEnv
@@ -37,6 +41,10 @@ from torchrl.modules.tensordict_module.actors import ProbabilisticActor, ValueOp
 from torchrl.objectives import SoftUpdate
 from torchrl.trainers import Recorder
 
+from rlhive.rl_envs import RoboHiveEnv
+from torchrl.envs import ParallelEnv, TransformedEnv, R3MTransform
+
+os.environ['WANDB_MODE'] = 'offline' ## offline sync. TODO: Remove this behavior
 
 def make_env():
     """
@@ -52,6 +60,12 @@ def make_env():
         "pixels_only": args.from_pixels,
     }
     env = env_library(*env_args, **env_kwargs)
+
+    env_name = args.task
+    base_env = RoboHiveEnv(env_name, device=device)
+    env = TransformedEnv(base_env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
+    assert env.device == device
+
     return env
 
 
@@ -154,10 +168,9 @@ def get_env_stats():
     return stats
 
 
-def make_recorder(actor_model_explore, stats):
-    # test_env = parallel_env_constructor(stats, num_worker=5)
-    base_env = make_env()
-    test_env = make_transformed_env(base_env, stats)
+def make_recorder(actor_model_explore):
+    _base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Change this to make_env() function
+    test_env = TransformedEnv(_base_env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
     recorder_obj = Recorder(
         record_frames=1000,
         frame_skip=args.frame_skip,
@@ -198,20 +211,17 @@ def make_replay_buffer(make_replay_buffer=3):
 
 
 def main():
-
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # get stats for normalization
-    stats = get_env_stats()
-
     # Create Environment
-    train_env = parallel_env_constructor(stats=stats, num_worker=args.env_per_collector)
+    base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Change this to make_env() function
+    train_env = TransformedEnv(base_env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
 
     # Create Agent
 
     # Define Actor Network
-    in_keys = ["observation_vector"]
+    in_keys = ["r3m_vec"] # TODO: Change this.
     action_spec = train_env.action_spec
     actor_net_kwargs = {
         "num_cells": [256, 256],
@@ -243,7 +253,7 @@ def main():
     )
     actor = ProbabilisticActor(
         spec=action_spec,
-        dist_in_keys=["loc", "scale"],
+        in_keys=["loc", "scale"],
         module=actor_module,
         distribution_class=dist_class,
         distribution_kwargs=dist_kwargs,
@@ -270,8 +280,8 @@ def main():
     model = nn.ModuleList([actor, qvalue]).to(device)
 
     # add forward pass for initialization with proof env
-    proof_env = make_transformed_env(make_env(), stats)
-
+    _base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Change this to make_env() function
+    proof_env = TransformedEnv(_base_env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
     # init nets
     with torch.no_grad(), set_exploration_mode("random"):
         td = proof_env.reset()
@@ -320,7 +330,7 @@ def main():
     replay_buffer = make_replay_buffer()
 
     # Trajectory recorder for evaluation
-    recorder = make_recorder(actor_model_explore, stats)
+    recorder = make_recorder(actor_model_explore)
 
     # Optimizers
     params = list(loss_module.parameters()) + list([loss_module.log_alpha])
@@ -440,6 +450,7 @@ def main():
         collector.shutdown()
 
 
+
 def get_args():
     """Reads conf.yaml file in the same directory"""
 
@@ -467,7 +478,7 @@ def get_args():
     )
     parser.add_argument(
         "--from_pixels",
-        action=argparse.BooleanOptionalAction,
+        action='store_true',
         default=False,
         help="Use pixel observations. Default: False",
     )
@@ -500,7 +511,7 @@ def get_args():
     )
     parser.add_argument(
         "--prb",
-        action=argparse.BooleanOptionalAction,
+        action='store_true',
         default=False,
         help="Use Prioritized Experience Replay Buffer. Default: False",
     )
@@ -577,7 +588,7 @@ def get_args():
         "--device", type=str, default="cuda:0", help="Training device. Default: cuda:0"
     )
     args = parser.parse_args()
-    
+
     # Update args with conf.yaml
     if args.conf.endswith('yaml'):
         with open(args.conf) as f:
