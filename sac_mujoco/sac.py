@@ -31,7 +31,7 @@ from torchrl.envs import (
 from torchrl.envs import EnvCreator
 from torchrl.envs.libs.dm_control import DMControlEnv
 from torchrl.envs.libs.gym import GymEnv
-from torchrl.envs.transforms import RewardScaling, TransformedEnv
+from torchrl.envs.transforms import RewardScaling, TransformedEnv, FlattenObservation
 from torchrl.envs.utils import set_exploration_mode
 from torchrl.modules import MLP, NormalParamWrapper, ProbabilisticActor, SafeModule
 from torchrl.modules.distributions import TanhNormal
@@ -77,10 +77,9 @@ def make_transformed_env(
     Apply transforms to the env (such as reward scaling and state normalization)
     """
 
-    env = TransformedEnv(env)
-
-    env.append_transform(RewardScaling(loc=0.0, scale=args.reward_scaling))
-
+    env = TransformedEnv(env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
+    env.append_transform(FlattenObservation(first_dim=0))
+    env.append_transform(RewardScaling(loc=0.0, scale=5.0))
     selected_keys = list(env.observation_spec.keys())
     out_key = "observation_vector"
     env.append_transform(CatTensors(in_keys=selected_keys, out_key=out_key))
@@ -94,7 +93,6 @@ def make_transformed_env(
         ObservationNorm(**_stats, in_keys=[out_key], standard_normal=True)
     )
     env.append_transform(DoubleToFloat(in_keys=[out_key], in_keys_inv=[]))
-
     return env
 
 
@@ -169,8 +167,8 @@ def get_env_stats():
 
 
 def make_recorder(actor_model_explore):
-    _base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Change this to make_env() function
-    test_env = TransformedEnv(_base_env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
+    _base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Move this to make_env() function
+    test_env = make_transformed_env(_base_env)
     recorder_obj = Recorder(
         record_frames=1000,
         frame_skip=args.frame_skip,
@@ -215,13 +213,13 @@ def main():
     np.random.seed(args.seed)
 
     # Create Environment
-    base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Change this to make_env() function
-    train_env = TransformedEnv(base_env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
+    base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Move this to make_env() function
+    train_env = make_transformed_env(base_env)
 
     # Create Agent
 
     # Define Actor Network
-    in_keys = ["r3m_vec"] # TODO: Change this.
+    in_keys = ["observation_vector"]
     action_spec = train_env.action_spec
     actor_net_kwargs = {
         "num_cells": [256, 256],
@@ -280,12 +278,13 @@ def main():
     model = nn.ModuleList([actor, qvalue]).to(device)
 
     # add forward pass for initialization with proof env
-    _base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Change this to make_env() function
-    proof_env = TransformedEnv(_base_env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
+    _base_env = RoboHiveEnv(args.task, device=args.device) # TODO: move this to make_env
+    proof_env = make_transformed_env(_base_env)
     # init nets
     with torch.no_grad(), set_exploration_mode("random"):
         td = proof_env.reset()
         td = td.to(device)
+        #print(td[in_keys[0]].shape)
         for net in model:
             net(td)
     del td
