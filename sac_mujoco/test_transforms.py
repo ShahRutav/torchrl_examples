@@ -1,7 +1,7 @@
 import torch
 from rlhive.rl_envs import RoboHiveEnv
 from torchrl.envs.utils import set_exploration_mode
-from torchrl.envs.transforms import RewardScaling, TransformedEnv
+from torchrl.envs.transforms import RewardScaling, TransformedEnv, FlattenObservation
 from torchrl.envs import TransformedEnv, R3MTransform
 from torchrl.envs import (
     CatTensors,
@@ -20,6 +20,7 @@ def make_transformed_env(
 
     #env = TransformedEnv(env)
     env = TransformedEnv(env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
+    env.append_transform(FlattenObservation(first_dim=0))
     env.append_transform(RewardScaling(loc=0.0, scale=5.0))
     selected_keys = list(env.observation_spec.keys())
     out_key = "observation_vector"
