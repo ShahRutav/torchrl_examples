@@ -31,7 +31,7 @@ from torchrl.envs import (
 from torchrl.envs import EnvCreator
 from torchrl.envs.libs.dm_control import DMControlEnv
 from torchrl.envs.libs.gym import GymEnv
-from torchrl.envs.transforms import RewardScaling, TransformedEnv, FlattenObservation
+from torchrl.envs.transforms import RewardScaling, TransformedEnv, FlattenObservation, Compose
 from torchrl.envs.utils import set_exploration_mode
 from torchrl.modules import MLP, NormalParamWrapper, ProbabilisticActor, SafeModule
 from torchrl.modules.distributions import TanhNormal
@@ -76,9 +76,7 @@ def make_transformed_env(
     """
     Apply transforms to the env (such as reward scaling and state normalization)
     """
-
-    env = TransformedEnv(env, R3MTransform('resnet50', in_keys=["pixels"], download=True))
-    env.append_transform(FlattenObservation(first_dim=0))
+    env = TransformedEnv(env, Compose(R3MTransform('resnet50', in_keys=["pixels"], download=True), FlattenObservation(-2, -1, in_keys=["r3m_vec"]))) # Necessary to Compose R3MTransform with FlattenObservation; Track bug: https://github.com/pytorch/rl/issues/802
     env.append_transform(RewardScaling(loc=0.0, scale=5.0))
     selected_keys = list(env.observation_spec.keys())
     out_key = "observation_vector"
