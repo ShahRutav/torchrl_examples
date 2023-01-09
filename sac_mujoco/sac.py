@@ -2,6 +2,7 @@
 
 
 import os
+import gc
 import argparse
 import yaml
 from typing import Optional
@@ -181,7 +182,6 @@ def make_recorder(actor_model_explore):
 def make_replay_buffer(make_replay_buffer=3):
     if args.prb:
         replay_buffer = TensorDictPrioritizedReplayBuffer(
-            args.buffer_size,
             alpha=0.7,
             beta=0.5,
             pin_memory=False,
@@ -194,7 +194,6 @@ def make_replay_buffer(make_replay_buffer=3):
         )
     else:
         replay_buffer = TensorDictReplayBuffer(
-            args.buffer_size,
             pin_memory=False,
             prefetch=make_replay_buffer,
             storage=LazyMemmapStorage(
@@ -443,6 +442,8 @@ def main():
                 pbar.set_description(
                     f"reward: {rewards[-1][1]: 4.4f} (r0 = {r0: 4.4f}), test reward: {rewards_eval[-1][1]: 4.4f}"
                 )
+            del tensordict
+            gc.collect()
 
         collector.shutdown()
 
