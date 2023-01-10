@@ -12,6 +12,8 @@ import torch
 import torch.cuda
 import tqdm
 
+import hydra
+from omegaconf import DictConfig, OmegaConf, open_dict
 import wandb
 #from torchrl.objectives import SACLoss
 from sac_loss import SACLoss
@@ -165,30 +167,42 @@ def get_env_stats():
     return stats
 
 
-def make_recorder(actor_model_explore):
-    _base_env = RoboHiveEnv(args.task, device=args.device) # TODO: Move this to make_env() function
+def make_recorder(
+                    task: str,
+                    frame_skip: int,
+                    record_interval: int,
+                    actor_model_explore: object,
+                    device: torch.device
+                 ):
+    _base_env = RoboHiveEnv(task, device=device) # TODO: Move this to make_env() function
     test_env = make_transformed_env(_base_env)
     recorder_obj = Recorder(
         record_frames=1000,
-        frame_skip=args.frame_skip,
+        frame_skip=frame_skip,
         policy_exploration=actor_model_explore,
         recorder=test_env,
         exploration_mode="mean",
-        record_interval=args.record_interval,
+        record_interval=record_interval,
     )
     return recorder_obj
 
 
-def make_replay_buffer(make_replay_buffer=3):
-    if args.prb:
+def make_replay_buffer(
+                        prb: bool,
+                        buffer_size: int,
+                        buffer_scratch_dir: str,
+                        device: torch.device,
+                        make_replay_buffer: int = 3
+                      ):
+    if prb:
         replay_buffer = TensorDictPrioritizedReplayBuffer(
             alpha=0.7,
             beta=0.5,
             pin_memory=False,
             prefetch=make_replay_buffer,
             storage=LazyMemmapStorage(
-                args.buffer_size,
-                scratch_dir=args.buffer_scratch_dir,
+                buffer_size,
+                scratch_dir=buffer_scratch_dir,
                 device=device,
             ),
         )
@@ -197,15 +211,24 @@ def make_replay_buffer(make_replay_buffer=3):
             pin_memory=False,
             prefetch=make_replay_buffer,
             storage=LazyMemmapStorage(
-                args.buffer_size,
-                scratch_dir=args.buffer_scratch_dir,
+                buffer_size,
+                scratch_dir=buffer_scratch_dir,
                 device=device,
             ),
         )
     return replay_buffer
 
 
-def main():
+
+@hydra.main(config_name="sac.yaml", config_path="config")
+def main(args: DictConfig):
+    device = (
+        torch.device("cuda:0")
+        if torch.cuda.is_available()
+        and torch.cuda.device_count() > 0
+        and args.device == "cuda:0"
+        else torch.device("cpu")
+    )
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -323,10 +346,21 @@ def main():
     collector.set_seed(args.seed)
 
     # Make Replay Buffer
-    replay_buffer = make_replay_buffer()
+    replay_buffer = make_replay_buffer(
+                                        prb=args.prb,
+                                        buffer_size=args.buffer_size,
+                                        buffer_scratch_dir=args.buffer_scratch_dir,
+                                        device=device,
+                                      )
 
     # Trajectory recorder for evaluation
-    recorder = make_recorder(actor_model_explore)
+    recorder = make_recorder(
+                                task=args.task,
+                                frame_skip=args.frame_skip,
+                                record_interval=args.record_interval,
+                                actor_model_explore=actor_model_explore,
+                                device=device
+                            )
 
     # Optimizers
     params = list(loss_module.parameters()) + list([loss_module.log_alpha])
@@ -447,162 +481,5 @@ def main():
 
         collector.shutdown()
 
-
-
-def get_args():
-    """Reads conf.yaml file in the same directory"""
-
-    parser = argparse.ArgumentParser(description="RL")
-
-    # Configuration file, keep first
-    parser.add_argument("--conf", "-c", default="conf.yaml")
-    parser.add_argument(
-        "--exp_name",
-        type=str,
-        default="cheetah",
-        help="Experiment name. Default: cheetah",
-    )
-    parser.add_argument(
-        "--task",
-        type=str,
-        default="HalfCheetah-v4",
-        help="MuJoCo training task. Default: HalfCheetah-v4",
-    )
-    parser.add_argument(
-        "--frame_skip",
-        type=int,
-        default=2,
-        help="Number of frames to skip also called action repeat. Default: 2",
-    )
-    parser.add_argument(
-        "--from_pixels",
-        action='store_true',
-        default=False,
-        help="Use pixel observations. Default: False",
-    )
-    parser.add_argument(
-        "--reward_scaling",
-        type=float,
-        default=5.0,
-        help="Reward scaling factor. Default: 5.0",
-    )
-    parser.add_argument(
-        "--init_env_steps",
-        type=int,
-        default=1000,
-        help="Initial environments steps used for observation stats computation. Default: 1000",
-    )
-    parser.add_argument(
-        "--env_per_collector",
-        type=int,
-        default=5,
-        help="Number of environments per collector device. Default: 5",
-    )
-    parser.add_argument(
-        "--record_interval",
-        type=int,
-        default=1,
-        help="Record interval for metrics logging based ob update iteration. Default: 1",
-    )
-    parser.add_argument(
-        "--seed", type=int, default=42, help="Seed for the experiment. Default: 42"
-    )
-    parser.add_argument(
-        "--prb",
-        action='store_true',
-        default=False,
-        help="Use Prioritized Experience Replay Buffer. Default: False",
-    )
-    parser.add_argument(
-        "--n_steps_forward",
-        type=int,
-        default=None,
-        help="Number of N-steps for the TD target calculation. Default: None (1 step)",
-    )
-    parser.add_argument(
-        "--gamma",
-        type=float,
-        default=0.99,
-        help="Return discounting value. Default: 0.99",
-    )
-    parser.add_argument(
-        "--buffer_size",
-        type=int,
-        default=100_000,
-        help="Replay Buffer size. Default: 100.000",
-    )
-    parser.add_argument(
-        "--buffer_scratch_dir",
-        type=str,
-        default="/tmp/",
-        help="Buffer directory. Default: /tmp/",
-    )
-    parser.add_argument(
-        "--max_frames_per_traj",
-        type=int,
-        default=-1,
-        help="Maximum number of frames per rollout trajectory.",
-    )
-    parser.add_argument(
-        "--frames_per_batch",
-        type=int,
-        default=1000,
-        help="Number of frames per rollout batch. Default: 1000",
-    )
-    parser.add_argument(
-        "--total_frames",
-        type=int,
-        default=1_000_000,
-        help="Total number of frames. Default: 1_000_000",
-    )
-    parser.add_argument(
-        "--init_random_frames",
-        type=int,
-        default=25000,
-        help="Number of transitions taken by a random policy to prefill the Replay Buffer. Default: 25000",
-    )
-    parser.add_argument(
-        "--batch_size", type=int, default=256, help="Batch size. Default: 256"
-    )
-    parser.add_argument(
-        "--utd_ratio",
-        type=int,
-        default=1,
-        help="Update-to_Data ratio. For off policy algorithms we want to take at least one updating step each transition sampled. Default: 1",
-    )
-    parser.add_argument(
-        "--lr", type=float, default=3e-4, help="Learning rate. Default: 3e-4"
-    )
-    parser.add_argument(
-        "--weight_decay", type=float, default=0.0, help="Weight decay. Default: 0.0"
-    )
-    parser.add_argument(
-        "--target_update_polyak",
-        type=float,
-        default=0.995,
-        help="Target network updating value for the soft-update. Default: 0.995",
-    )
-    parser.add_argument(
-        "--device", type=str, default="cuda:0", help="Training device. Default: cuda:0"
-    )
-    args = parser.parse_args()
-
-    # Update args with conf.yaml
-    if args.conf.endswith('yaml'):
-        with open(args.conf) as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
-        args.__dict__.update(config)
-
-    return args
-
-
 if __name__ == "__main__":
-    args = get_args()
-    device = (
-        torch.device("cuda:0")
-        if torch.cuda.is_available()
-        and torch.cuda.device_count() > 0
-        and args.device == "cuda:0"
-        else torch.device("cpu")
-    )
     main()
