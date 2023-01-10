@@ -3,7 +3,7 @@ default:
     - override hydra/launcher: local
 
 # Logger
-exp_name: cheetah
+exp_name: sac
 record_interval: 1
 device: "cuda:0"
 
