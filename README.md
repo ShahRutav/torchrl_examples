@@ -12,7 +12,9 @@ python3 -mpip install git+https://github.com/facebookresearch/rlhive.git
 ```
 
 ## Launching Experiments
-[NOTE] Set ulimit for your shell (default 1024): `ulimit -n 4096`
+[NOTE] Set ulimit for your shell (default 1024): `ulimit -n 4096`  
+Set your slurm configs especially `partition` and `hydra.run.dir`   
+Slurm file locations `sac_mujoco/config/hydra/launcher/slurm.yaml` and `sac_mujoco/config/hydra/output/slurm.yaml`  
 ```
 cd sac_mujoco
 sim_backend=MUJOCO MUJOCO_GL=egl python sac.py -m hydra/launcher=slurm hydra/output=slurm
