@@ -1,6 +1,4 @@
 export MJENV_LIB_PATH="mj_envs"
-conda create -n rlhive -y python=3.8
-conda activate rlhive
 
 python3 -mpip install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cu116
 
